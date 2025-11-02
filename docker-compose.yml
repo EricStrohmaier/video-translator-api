@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  video-translator:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - GOOGLE_VISION_API_KEY=${GOOGLE_VISION_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PORT=3000
+    volumes:
+      - ./video.mp4:/app/video.mp4:ro
+      - ./temp:/app/temp
+    restart: unless-stopped

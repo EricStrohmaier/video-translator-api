@@ -1,0 +1,26 @@
+{
+  "name": "video-text-translator",
+  "version": "1.0.0",
+  "description": "Translate text in videos using OCR and AI",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node src/test.js"
+  },
+  "keywords": ["video", "translation", "ocr", "ai"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.8.0",
+    "openai": "^4.20.0",
+    "dotenv": "^16.3.1",
+    "fluent-ffmpeg": "^2.1.2",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "ffmpeg-static": "^5.2.0"
+  }
+}
