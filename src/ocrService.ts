@@ -1,23 +1,32 @@
 import { promises as fs } from "fs";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import type { TextBox } from "./types.js";
+
 dotenv.config();
 
-const GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY;
+const GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY!;
 const VISION_API_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`;
 
+interface VisionResponse {
+  responses?: Array<{
+    textAnnotations?: Array<{
+      description: string;
+      boundingPoly: {
+        vertices: Array<{ x?: number; y?: number }>;
+      };
+    }>;
+  }>;
+}
+
 /**
- * Detect text in a single frame using Google Vision API
- * @param {string} imagePath - Path to image file
- * @returns {Promise<Array>} Array of detected texts with positions
+ * Detect text in a single frame image
  */
-async function detectTextInFrame(imagePath) {
+export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
   try {
-    // Read image and convert to base64
     const imageBuffer = await fs.readFile(imagePath);
     const base64Image = imageBuffer.toString("base64");
 
-    // Call Google Vision API
     const response = await fetch(VISION_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -35,20 +44,19 @@ async function detectTextInFrame(imagePath) {
       throw new Error(`Vision API error: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data: VisionResponse = await response.json();
     const annotations = data.responses?.[0]?.textAnnotations || [];
 
     if (annotations.length === 0) {
       return [];
     }
 
+    const texts: TextBox[] = [];
     // Skip first annotation (full text), process individual words
-    const texts = [];
     for (let i = 1; i < annotations.length; i++) {
       const annotation = annotations[i];
       const vertices = annotation.boundingPoly.vertices;
 
-      // Calculate bounding box
       const x = Math.min(...vertices.map((v) => v.x || 0));
       const y = Math.min(...vertices.map((v) => v.y || 0));
       const width = Math.max(...vertices.map((v) => v.x || 0)) - x;
@@ -60,23 +68,33 @@ async function detectTextInFrame(imagePath) {
         y,
         width,
         height,
-        fontSize: Math.round(height * 0.8), // Estimate font size
+        fontSize: Math.round(height * 0.8),
       });
     }
 
     return texts;
   } catch (error) {
-    console.error(`   ⚠️  OCR failed for ${imagePath}:`, error.message);
+    console.error(
+      `   ⚠️  OCR failed for ${imagePath}:`,
+      (error as Error).message
+    );
     return [];
   }
 }
 
 /**
  * Detect text in multiple frames
- * @param {Array} frames - Array of frame objects with path and frameNumber
- * @returns {Promise<Array>} Array of detection results
  */
-export async function detectTextInFrames(frames) {
+export async function detectTextInFrames(
+  frames: Array<{ path: string; name: string; frameNumber: number }>
+): Promise<
+  Array<{
+    framePath: string;
+    frameName: string;
+    frameNumber: number;
+    texts: TextBox[];
+  }>
+> {
   const detections = [];
 
   for (const frame of frames) {
@@ -93,7 +111,6 @@ export async function detectTextInFrames(frames) {
       texts,
     });
 
-    // Small delay to avoid rate limiting
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 

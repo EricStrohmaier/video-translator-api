@@ -1,31 +1,20 @@
-# 🎬 Video Text Translator - Node.js/Hono API
+# 🎬 Video Text Translator API (ASS Subtitles)
 
-A clean, production-ready API to translate text in videos using OCR and AI.
+Translate on-video text and render a clean, bottom-center subtitle using ASS.
 
-## 🚀 What It Does
-
-1. **Extracts frames** from video (1 fps)
-2. **Detects text** in each frame using Google Vision OCR
-3. **Translates text** using OpenAI GPT-4o-mini
-4. **Overlays translated text** at the exact same positions
-5. **Returns translated video**
-
-## 📁 Project Structure
+## 📁 Structure (TypeScript)
 
 ```
-video-translator/
-├── src/
-│   ├── index.js              # Hono API server
-│   ├── videoTranslator.js    # Main workflow orchestrator
-│   ├── frameExtractor.js     # FFmpeg frame extraction
-│   ├── ocrService.js         # Google Vision OCR
-│   ├── translationService.js # OpenAI translation
-│   ├── videoComposer.js      # FFmpeg text overlay
-│   └── test.js               # Test script
-├── video.mp4                 # Your input video (place here)
-├── package.json
-├── .env                      # Your API keys
-└── README.md
+src/
+  index.ts                 # Hono server
+  videoTranslator.ts       # Original overlay path (kept)
+  subtitleTranslator.ts    # ASS-only workflow (bottom-center)
+  subtitleComposer.ts      # ASS builder (supports request options + env)
+  frameExtractor.ts        # FFmpeg frame extraction
+  ocrService.ts            # Google Vision OCR
+  translationService.ts    # OpenAI translation
+  types.ts
+video.mp4                  # Input video
 ```
 
 ## 🔧 Setup
@@ -88,13 +77,25 @@ This will:
 ### Option 2: API Server
 
 ```bash
-# Start server
+# Start server (TypeScript)
 npm run dev
 
-# In another terminal, call the API:
-curl -X POST http://localhost:3000/translate \
+# Translate with ASS bottom-center subtitles
+curl -X POST http://localhost:3000/translate-ass \
   -H "Content-Type: application/json" \
-  -d '{"targetLanguage": "Chinese"}'
+  -d '{
+        "targetLanguage": "Chinese",
+        "options": {
+          "baseFontSize": 52,
+          "boxPad": 12,
+          "marginV": 90,
+          "textColorHex": "#FFFFFF",
+          "bgColorHex": "#00000066",
+          "forceOneLine": false,
+          "fontUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+          "fontName": "Noto Sans CJK SC"
+        }
+      }'
 ```
 
 ### Option 3: Different Language
@@ -105,7 +106,7 @@ curl -X POST http://localhost:3000/translate \
   -d '{"targetLanguage": "Spanish"}'
 ```
 
-## 📊 API Response
+## 📊 API Response (translate-ass)
 
 ```json
 {
@@ -153,7 +154,7 @@ video.mp4
   ↓
 [Map to Frames] → Frame 1: "订阅" at (x:100, y:50)
   ↓
-[FFmpeg Overlay] → Apply translated text on video
+[ASS Subtitle Overlay] → Bottom-center overlay (one line if fits, else two)
   ↓
 output_translated.mp4 ✨
 ```
@@ -200,37 +201,62 @@ ffmpeg -version
 - Process shorter video clips
 - Increase Node.js memory: `node --max-old-space-size=4096 src/index.js`
 
-## 🔧 Customization
+## 🔧 Subtitle Options (request or .env fallback)
 
-### Change Frame Rate
+Pass an `options` object in the `POST /translate-ass` payload. Any field you omit falls back to .env.
 
-Edit `src/frameExtractor.js`:
-```javascript
-// Current: 1 frame per second
-.outputOptions(['-vf fps=1'])
+- baseFontSize (number) → default: `ASS_BASE_FONTSIZE` or 44
+- boxPad (number) → default: `ASS_BOX_PAD` or 10
+- marginV (number) → default: `ASS_MARGIN_V` or 90
+- textColorHex (string) → default: `SUB_TEXT_COLOR` or `#FFFFFF`
+- bgColorHex (string) → default: `SUB_BG_COLOR` or `#00000080`
+- forceOneLine (boolean) → default: `ASS_FORCE_ONE_LINE` (false)
+- fontUrl (string) → default: `ASS_FONT_URL` (downloaded at run-time)
+- fontName (string) → default: `ASS_FONT_NAME` (or infer from filename)
+- cjkWidthFactor (number) → default: `CJK_WIDTH_FACTOR` (0.9)
+- latinWidthFactor (number) → default: `LATIN_WIDTH_FACTOR` (0.62)
+ - roundedRadius (number) → soft, visually rounded corners via blur (default 0)
+ - bgBlur (number) → blur strength for the badge shape (default 0)
 
-// Higher accuracy: 2 frames per second
-.outputOptions(['-vf fps=2'])
+Notes:
+- Colors accept `#RRGGBB` or `#RRGGBBAA` (AA = 00 opaque … FF transparent). Example: `#00000066`.
+- If you provide `fontUrl`, use a direct `.otf/.ttf` URL (e.g. raw.githubusercontent.com). Ensure `fontName` matches the font’s internal family, e.g. “Noto Sans CJK SC”.
+ - `roundedRadius` and `bgBlur` create a soft, rounded-looking badge using a blurred vector rectangle behind the text. For a visible result, pick a semi-opaque bg color (e.g. `#00000066`).
 
-// Lower cost: 0.5 frames per second  
-.outputOptions(['-vf fps=0.5'])
+### .env keys
+```
+ASS_BASE_FONTSIZE=52
+ASS_BOX_PAD=12
+ASS_MARGIN_V=90
+SUB_TEXT_COLOR=#FFFFFF
+SUB_BG_COLOR=#00000066
+ASS_FORCE_ONE_LINE=0
+ASS_FONT_URL=https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+ASS_FONT_NAME=Noto Sans CJK SC
+CJK_WIDTH_FACTOR=0.9
+LATIN_WIDTH_FACTOR=0.62
+ROUNDED_RADIUS=0
+BG_BLUR=0
 ```
 
-### Change Text Styling
+## 👀 Preview (single-frame)
 
-Edit `src/videoComposer.js`:
-```javascript
-// Current styling
-`fontcolor=white:` +
-`box=1:` +
-`boxcolor=black@0.75:` +  // Semi-transparent black box
-`boxborderw=5:` +          // Padding
+The composer includes `renderSubtitlesPreview(...)` which renders a PNG with the same style as the final video. Proposed endpoint:
 
-// Custom styling examples:
-`fontcolor=yellow:` +       // Yellow text
-`boxcolor=red@0.5:` +       // Red background, 50% opacity
-`boxborderw=10:` +          // More padding
+```http
+POST /preview-ass
+Body: {
+  "targetLanguage": "Chinese",
+  "options": { ...same as translate-ass options... }
+}
 ```
+
+Behavior:
+- Runs OCR until it finds the first frame with text.
+- Translates that one frame.
+- Renders a PNG using `renderSubtitlesPreview` and returns it as `image/png`.
+
+If you want, wire this endpoint in `src/index.ts` and I’ll provide the handler stub.
 
 ### Use Different OCR (Tesseract)
 
@@ -315,7 +341,11 @@ fly deploy
 3. Add environment variables
 4. Deploy! 🚀
 
-## 🎯 Why This is Better Than n8n
+## 🧩 Tips
+
+- For a darker badge: `bgColorHex: "#00000080"`.
+- For single long lines: `forceOneLine: true`.
+- To push higher above the bottom: increase `marginV`.
 
 | Feature | This Project | n8n |
 |---------|-------------|-----|
@@ -341,4 +371,4 @@ MIT - Do whatever you want with it!
 
 ---
 
-**Made with ❤️ and way less frustration than n8n** 😅
+**Made with ❤️**
