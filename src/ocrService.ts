@@ -15,6 +15,7 @@ interface VisionResponse {
       boundingPoly: {
         vertices: Array<{ x?: number; y?: number }>;
       };
+      confidence?: number;
     }>;
   }>;
 }
@@ -35,13 +36,25 @@ function isValidText(text: string): boolean {
     return false;
   }
 
-  // Filter out random character combinations that aren't words
-  if (text.length < 2 && !/[a-zA-Z0-9\u3400-\u9fff]/.test(text)) {
+  // Filter out standalone numbers (likely false positives from backgrounds/graphics)
+  // Allow numbers that are part of longer text
+  if (/^\d{1,3}$/.test(text) && text.length <= 3) {
+    // Single numbers like "1", "20", "100" are likely noise
     return false;
   }
 
-  // Must contain at least one letter or number or CJK character
-  if (!/[\p{L}\p{N}]/u.test(text)) {
+  // Filter out single characters that are just punctuation or symbols
+  if (text.length === 1 && /[^\p{L}\p{N}]/u.test(text)) {
+    return false;
+  }
+
+  // Filter out random character combinations that aren't words
+  if (text.length < 2 && !/[a-zA-Z\u3400-\u9fff]/.test(text)) {
+    return false;
+  }
+
+  // Must contain at least one letter (not just numbers/symbols)
+  if (!/[\p{L}]/u.test(text)) {
     return false;
   }
 
@@ -81,7 +94,15 @@ export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
         requests: [
           {
             image: { content: base64Image },
-            features: [{ type: "TEXT_DETECTION", maxResults: 100 }],
+            features: [
+              {
+                type: "TEXT_DETECTION",
+                maxResults: 100,
+              },
+            ],
+            imageContext: {
+              languageHints: ["en"], // Hint for English text
+            },
           },
         ],
       }),
