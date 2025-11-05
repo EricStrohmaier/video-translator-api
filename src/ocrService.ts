@@ -36,11 +36,16 @@ function isValidText(text: string): boolean {
     return false;
   }
 
-  // Filter out standalone numbers (likely false positives from backgrounds/graphics)
-  // Allow numbers that are part of longer text
-  if (/^\d{1,3}$/.test(text) && text.length <= 3) {
-    // Single numbers like "1", "20", "100" are likely noise
-    return false;
+  if ((process.env.OCR_FILTER_STANDALONE_NUMBERS || '0') === '1') {
+    if (/^\d{1,3}$/.test(text) && text.length <= 3) {
+      return false;
+    }
+  }
+
+  if (/^\d+$/.test(text)) {
+    if (text.length >= 2 && (process.env.OCR_ALLOW_MULTI_DIGIT_NUMBERS || '0') !== '1') {
+      return false;
+    }
   }
 
   // Filter out single characters that are just punctuation or symbols
@@ -50,12 +55,16 @@ function isValidText(text: string): boolean {
 
   // Filter out random character combinations that aren't words
   if (text.length < 2 && !/[a-zA-Z\u3400-\u9fff]/.test(text)) {
-    return false;
+    if (!/^\d$/.test(text)) {
+      return false;
+    }
   }
 
   // Must contain at least one letter (not just numbers/symbols)
   if (!/[\p{L}]/u.test(text)) {
-    return false;
+    if (!/^\d$/.test(text)) {
+      return false;
+    }
   }
 
   return true;

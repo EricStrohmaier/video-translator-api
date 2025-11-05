@@ -8,7 +8,25 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
+const deepseek = deepseekApiKey
+  ? new OpenAI({
+      apiKey: deepseekApiKey,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+    })
+  : null;
+
+const OPENAI_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-4o-mini";
+const DEEPSEEK_MODEL =
+  process.env.DEEPSEEK_TRANSLATION_MODEL || "deepseek-chat";
 const DEBUG_TRANSLATION = process.env.DEBUG_TRANSLATION === "1";
+
+function pickProvider(targetLanguage: string): "deepseek" | "openai" {
+  const lang = targetLanguage.toLowerCase();
+  const isZh = lang.includes("chinese") || lang.includes("中文") || lang.startsWith("zh");
+  if (isZh && deepseek) return "deepseek";
+  return "openai";
+}
 
 /**
  * Get language-specific translation instructions
@@ -69,8 +87,11 @@ export async function translateSequence(
 ): Promise<TranslationMap> {
   if (!Array.isArray(texts) || texts.length === 0) return {};
   try {
-    const languageInstructions = getLanguageSpecificInstructions(targetLanguage);
-    const numbered = texts.map((t, i) => ({ index: i + 1, text: t })).filter((x) => (x.text || '').trim().length > 0);
+    const languageInstructions =
+      getLanguageSpecificInstructions(targetLanguage);
+    const numbered = texts
+      .map((t, i) => ({ index: i + 1, text: t }))
+      .filter((x) => (x.text || "").trim().length > 0);
     const prompt = `You are a professional subtitle/localization translator specializing in educational, step-based video content.
 You are given an ordered sequence of on-screen English lines. Translate them into natural, readable ${targetLanguage} suitable for bottom-center subtitles.
 
@@ -87,10 +108,22 @@ Return ONLY a valid JSON object mapping each original string to its translation:
 
 Sequence:\n${JSON.stringify(numbered)}`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+    const provider = pickProvider(targetLanguage);
+    const client = provider === "deepseek" ? deepseek! : openai;
+    const model = provider === "deepseek" ? DEEPSEEK_MODEL : OPENAI_MODEL;
+    if (DEBUG_TRANSLATION) {
+      try {
+        console.log(`   [debug] provider: ${provider}, model: ${model}`);
+      } catch {}
+    }
+    const response = await client.chat.completions.create({
+      model,
       messages: [
-        { role: "system", content: "Return only valid JSON with original text as keys and translations as values. No extra text." },
+        {
+          role: "system",
+          content:
+            "Return only valid JSON with original text as keys and translations as values. No extra text.",
+        },
         { role: "user", content: prompt },
       ],
       temperature: 0.2,
@@ -99,8 +132,14 @@ Sequence:\n${JSON.stringify(numbered)}`;
 
     const content = response.choices[0].message.content!;
     if (DEBUG_TRANSLATION) {
-      console.log("   [debug] sequence translation raw length:", content.length);
-      console.log("   [debug] sequence translation snippet:", content.slice(0, 300));
+      console.log(
+        "   [debug] sequence translation raw length:",
+        content.length
+      );
+      console.log(
+        "   [debug] sequence translation snippet:",
+        content.slice(0, 300)
+      );
     }
 
     let translationMap: TranslationMap;
@@ -117,7 +156,9 @@ Sequence:\n${JSON.stringify(numbered)}`;
     return translationMap;
   } catch (error) {
     console.error("Sequence translation error:", (error as Error).message);
-    throw new Error(`Failed to translate sequence: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to translate sequence: ${(error as Error).message}`
+    );
   }
 }
 
@@ -157,8 +198,16 @@ Example format: {"Hello": "Hola", "World": "Mundo"}
 
 Texts to translate: ${JSON.stringify(texts)}`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+    const provider = pickProvider(targetLanguage);
+    const client = provider === "deepseek" ? deepseek! : openai;
+    const model = provider === "deepseek" ? DEEPSEEK_MODEL : OPENAI_MODEL;
+    if (DEBUG_TRANSLATION) {
+      try {
+        console.log(`   [debug] provider: ${provider}, model: ${model}`);
+      } catch {}
+    }
+    const response = await client.chat.completions.create({
+      model,
       messages: [
         {
           role: "system",

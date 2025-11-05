@@ -24,6 +24,46 @@ npm run test
 
 ## 📡 API Endpoints
 
+### Production API (recommended)
+
+#### `POST /api/upload`
+Translate a video and return a job ID (multipart/form-data). The job can be polled via `/api/jobs/:id` and downloaded via `/api/download/:jobId` when complete.
+
+Request:
+```bash
+curl -X POST http://localhost:3000/api/upload \
+  -F 'videoUrl=https://example.com/clip.mp4' \
+  -F 'targetLanguage=Russian' \
+  -F 'options={
+    "baseFontSize": 46,
+    "roundedRadius": 14,
+    "bgColorHex": "#000000CC",
+    "padX": 8,
+    "padTop": 6,
+    "padBottom": 12,
+    "maxWidthFraction": 0.9
+  }'
+```
+
+#### `POST /api/preview`
+Generate a PNG preview (multipart/form-data). Accepts the same `options` as upload plus `previewAtSeconds`.
+
+Request:
+```bash
+curl -X POST http://localhost:3000/api/preview \
+  -F 'videoUrl=https://example.com/clip.mp4' \
+  -F 'targetLanguage=Russian' \
+  -F 'previewAtSeconds=7' \
+  -F 'options={
+    "roundedRadius": 14,
+    "padX": 8,
+    "padTop": 6,
+    "padBottom": 12,
+    "bgColorHex": "#000000CC"
+  }' \
+  -o preview.png
+```
+
 ### `POST /translate-ass`
 Translate video with bottom-center ASS subtitles (recommended).
 
@@ -109,13 +149,17 @@ All options are **optional** and fall back to `.env` values or defaults.
 | `marginV` | number | `90` | Distance from bottom of video in pixels |
 | `textColorHex` | string | `#FFFFFF` | Text color in hex format (supports `#RRGGBB` or `#RRGGBBAA`) |
 | `bgColorHex` | string | `#00000080` | Background color in hex format (supports `#RRGGBB` or `#RRGGBBAA`) |
-| `roundedRadius` | number | `0` | Corner radius for rounded rectangles (0 = sharp corners) |
+| `roundedRadius` | number | `12` | Corner radius for rounded rectangles (0 = sharp corners) |
 | `bgBlur` | number | `0` | Blur amount for soft edges in pixels (0 = sharp edges) |
 | `forceOneLine` | boolean | `false` | Force text to single line even if long |
 | `fontUrl` | string | `""` | Direct URL to .otf/.ttf font file |
 | `fontName` | string | `""` | Font family name (e.g., "Noto Sans CJK SC") |
 | `cjkWidthFactor` | number | `0.9` | Width estimation factor for CJK characters |
 | `latinWidthFactor` | number | `0.62` | Width estimation factor for Latin characters |
+| `padX` | number | `~0.75*boxPad` | Horizontal padding (px) for background badge |
+| `padTop` | number | `~0.6*boxPad` | Top padding (px) for background badge |
+| `padBottom` | number | `boxPad` | Bottom padding (px) for background badge |
+| `maxWidthFraction` | number | `0.9` | Max text block width as a fraction of video width (0.5–0.98) |
 | `previewAtSeconds` | number | `0` | Timestamp to extract preview frame (preview-ass only) |
 
 **Color Format Notes:**

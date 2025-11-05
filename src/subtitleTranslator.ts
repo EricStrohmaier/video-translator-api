@@ -210,11 +210,13 @@ function groupTextsIntoLines(frame: FrameDet): GroupedFrame {
 }
 
 function filterSubtitleLike(frames: GroupedFrame[]): GroupedFrame[] {
-  const region = (process.env.SUBTITLE_REGION || 'bottom').toLowerCase();
+  const filterOff = (process.env.SUBTITLE_FILTER_OFF || '0') === '1';
+  if (filterOff) return frames;
+  const region = (process.env.SUBTITLE_REGION || 'any').toLowerCase();
   const regionFrac = Math.min(1, Math.max(0.05, Number(process.env.SUBTITLE_REGION_FRACTION || 0.5)));
-  const minChars = Math.max(1, Number(process.env.SUBTITLE_MIN_CHARS || 6));
-  const minWords = Math.max(1, Number(process.env.SUBTITLE_MIN_WORDS || 2));
-  const minAspect = Math.max(1, Number(process.env.SUBTITLE_MIN_ASPECT || 3));
+  const minChars = Math.max(1, Number(process.env.SUBTITLE_MIN_CHARS || 2));
+  const minWords = Math.max(1, Number(process.env.SUBTITLE_MIN_WORDS || 1));
+  const minAspect = Math.max(1, Number(process.env.SUBTITLE_MIN_ASPECT || 2));
   const maxLinesPerFrame = Math.max(1, Number(process.env.SUBTITLE_MAX_LINES_PER_FRAME || 2));
   const requirePersistence = (process.env.SUBTITLE_REQUIRE_PERSISTENCE || '1') !== '0';
 
@@ -233,6 +235,9 @@ function filterSubtitleLike(frames: GroupedFrame[]): GroupedFrame[] {
       const half = (estFrameHeight * regionFrac) / 2;
       regionStart = Math.max(0, mid - half);
       regionEnd = Math.min(estFrameHeight, mid + half);
+    } else if (region === 'any') {
+      regionStart = 0;
+      regionEnd = estFrameHeight;
     }
 
     const filtered = frame.texts
