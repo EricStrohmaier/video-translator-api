@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -19,7 +20,7 @@ class LocalStorage implements StorageProvider {
   private baseDir: string;
 
   constructor() {
-    this.baseDir = path.join(process.cwd(), 'uploads');
+    this.baseDir = path.join(os.tmpdir(), 'uploads');
   }
 
   async upload(filePath: string, key: string): Promise<string> {

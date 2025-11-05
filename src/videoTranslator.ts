@@ -1,6 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg';
 import { promises as fs } from 'fs';
 import path from 'path';
+import os from 'os';
 import { extractFrames, getVideoDuration } from './frameExtractor.js';
 import { detectTextInFrames } from './ocrService.js';
 import { translateTexts } from './translationService.js';
@@ -166,7 +167,7 @@ export interface TranslationResult {
  */
 export async function translateVideo(videoPath: string, targetLanguage: string): Promise<TranslationResult> {
   const startTime = Date.now();
-  const workDir = `./temp/job_${Date.now()}`;
+  const workDir = path.join(os.tmpdir(), 'vt', `job_${Date.now()}`);
 
   try {
     console.log('📁 Creating working directory...');

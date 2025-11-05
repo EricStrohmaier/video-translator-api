@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
 import fetch from "node-fetch";
+import os from "os";
 
 dotenv.config();
 
@@ -57,8 +58,8 @@ app.use(
   })
 );
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), "uploads");
+// Ensure uploads directory exists (use writable tmp dir on serverless platforms)
+const uploadsDir = path.join(os.tmpdir(), "uploads");
 await fs.mkdir(uploadsDir, { recursive: true });
 
 // Health check
