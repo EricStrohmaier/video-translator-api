@@ -25,13 +25,16 @@ Translate the following on-screen English texts into natural, readable ${targetL
 Rules:
 - Keep meaning and intent; do not translate brand names.
 - Preserve numbers, times, and units as-is.
-- Remove decorative characters, emojis, and ASCII art.
+- DO NOT translate single symbols like arrows (→, ←, ↑, ↓), bullets (•, ·), or decorative characters.
+- Return symbols and single-character decorative elements unchanged.
+- Remove or skip emojis, ASCII art, and meaningless character combinations.
 - Keep translations concise to fit within the original bounding box.
 - If a string is meaningless (e.g., random letters), return the original.
+- DO NOT include or translate Arabic, Hebrew, or other non-Latin scripts that appear to be OCR errors.
 
 Return ONLY a valid JSON object: { "<original>": "<translated>" } with every input string present as a key.
 
-Example format: {"Hello": "Hola", "World": "Mundo"}
+Example format: {"Hello": "Hola", "World": "Mundo", "→": "→"}
 
 Texts to translate: ${JSON.stringify(texts)}`;
 

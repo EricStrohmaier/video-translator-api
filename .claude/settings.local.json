@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(awk:*)",
+      "Bash(xargs cat:*)",
+      "Bash(npm ls:*)",
+      "Bash(npm install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

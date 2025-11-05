@@ -6,7 +6,9 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:prod": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "start:prod": "tsx src/index.ts",
     "test": "tsx src/test.ts",
     "subtitle": "tsx src/subtitleTranslator.ts"
   },

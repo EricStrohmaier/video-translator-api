@@ -20,6 +20,53 @@ interface VisionResponse {
 }
 
 /**
+ * Clean and validate OCR text
+ */
+function isValidText(text: string): boolean {
+  if (!text || text.trim().length === 0) return false;
+
+  // Filter out single decorative symbols
+  if (text.length === 1 && /[→←↑↓•·◆▪▫■□●○★☆]/.test(text)) {
+    return false;
+  }
+
+  // Filter out Arabic/Persian/Hebrew characters (common OCR noise)
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]/.test(text)) {
+    return false;
+  }
+
+  // Filter out random character combinations that aren't words
+  if (text.length < 2 && !/[a-zA-Z0-9\u3400-\u9fff]/.test(text)) {
+    return false;
+  }
+
+  // Must contain at least one letter or number or CJK character
+  if (!/[\p{L}\p{N}]/u.test(text)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Clean OCR text
+ */
+function cleanOCRText(text: string): string {
+  if (!text) return text;
+
+  // Remove zero-width characters
+  text = text.replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+  // Remove combining diacritical marks that are artifacts
+  text = text.replace(/[\u0300-\u036F]/g, '');
+
+  // Trim whitespace
+  text = text.trim();
+
+  return text;
+}
+
+/**
  * Detect text in a single frame image
  */
 export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
@@ -55,6 +102,13 @@ export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
     // Skip first annotation (full text), process individual words
     for (let i = 1; i < annotations.length; i++) {
       const annotation = annotations[i];
+      const cleanedText = cleanOCRText(annotation.description);
+
+      // Skip invalid text
+      if (!isValidText(cleanedText)) {
+        continue;
+      }
+
       const vertices = annotation.boundingPoly.vertices;
 
       const x = Math.min(...vertices.map((v) => v.x || 0));
@@ -62,8 +116,13 @@ export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
       const width = Math.max(...vertices.map((v) => v.x || 0)) - x;
       const height = Math.max(...vertices.map((v) => v.y || 0)) - y;
 
+      // Skip tiny boxes (likely noise)
+      if (width < 5 || height < 5) {
+        continue;
+      }
+
       texts.push({
-        text: annotation.description,
+        text: cleanedText,
         x,
         y,
         width,

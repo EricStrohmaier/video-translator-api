@@ -1,0 +1,78 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist
+build
+*.log
+
+# Temporary files
+temp
+uploads
+*.tmp
+*.temp
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+README-PRODUCTION.md
+*.md
+
+# Test files
+test
+tests
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Video files
+*.mp4
+*.mov
+*.avi
+*.webm
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+jobs.db
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Other
+.prettierrc
+.eslintrc
+tsconfig.json
