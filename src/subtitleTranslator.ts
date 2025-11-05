@@ -209,6 +209,82 @@ function groupTextsIntoLines(frame: FrameDet): GroupedFrame {
   };
 }
 
+function filterSubtitleLike(frames: GroupedFrame[]): GroupedFrame[] {
+  const region = (process.env.SUBTITLE_REGION || 'bottom').toLowerCase();
+  const regionFrac = Math.min(1, Math.max(0.05, Number(process.env.SUBTITLE_REGION_FRACTION || 0.5)));
+  const minChars = Math.max(1, Number(process.env.SUBTITLE_MIN_CHARS || 6));
+  const minWords = Math.max(1, Number(process.env.SUBTITLE_MIN_WORDS || 2));
+  const minAspect = Math.max(1, Number(process.env.SUBTITLE_MIN_ASPECT || 3));
+  const maxLinesPerFrame = Math.max(1, Number(process.env.SUBTITLE_MAX_LINES_PER_FRAME || 2));
+  const requirePersistence = (process.env.SUBTITLE_REQUIRE_PERSISTENCE || '1') !== '0';
+
+  const prelim = frames.map((frame) => {
+    const estFrameHeight = Math.max(1, Math.max(0, ...frame.texts.map((t) => t.y + t.height)) + 10);
+    let regionStart = 0;
+    let regionEnd = estFrameHeight;
+    if (region === 'bottom') {
+      regionStart = estFrameHeight * (1 - regionFrac);
+      regionEnd = estFrameHeight;
+    } else if (region === 'top') {
+      regionStart = 0;
+      regionEnd = estFrameHeight * regionFrac;
+    } else if (region === 'middle') {
+      const mid = estFrameHeight / 2;
+      const half = (estFrameHeight * regionFrac) / 2;
+      regionStart = Math.max(0, mid - half);
+      regionEnd = Math.min(estFrameHeight, mid + half);
+    }
+
+    const filtered = frame.texts
+      .filter((t) => {
+        const aspect = (t.width || 1) / Math.max(1, t.height);
+        const wordCount = (t.text || '').trim().split(/\s+/).filter(Boolean).length;
+        const charCount = (t.text || '').replace(/\s+/g, '').length;
+        const lineMidY = t.y + t.height / 2;
+
+        const inRegion = lineMidY >= regionStart && lineMidY <= regionEnd;
+        const passesText = charCount >= minChars && wordCount >= minWords;
+        const passesAspect = aspect >= minAspect;
+
+        return inRegion && passesText && passesAspect;
+      })
+      .sort((a, b) => b.width - a.width)
+      .slice(0, maxLinesPerFrame);
+
+    return { ...frame, texts: filtered } as GroupedFrame;
+  });
+
+  if (!requirePersistence) return prelim;
+
+  const occurrences = new Map<string, number[]>();
+  for (const f of prelim) {
+    for (const t of f.texts) {
+      if (!t.text) continue;
+      const arr = occurrences.get(t.text) || [];
+      arr.push(f.frameNumber);
+      occurrences.set(t.text, arr);
+    }
+  }
+
+  const keepTexts = new Set<string>();
+  occurrences.forEach((framesArr, text) => {
+    const sorted = framesArr.slice().sort((a, b) => a - b);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === sorted[i - 1] + 1) {
+        keepTexts.add(text);
+        break;
+      }
+    }
+  });
+
+  const finalFrames = prelim.map((f) => ({
+    ...f,
+    texts: f.texts.filter((t) => keepTexts.has(t.text)),
+  }));
+
+  return finalFrames;
+}
+
 export async function translateVideoAss(
   videoPath: string,
   targetLanguage: string,
@@ -250,9 +326,10 @@ export async function translateVideoAss(
 
     console.log("📝 Step 3: Grouping OCR words into lines...");
     const groupedFrames: GroupedFrame[] = detections.map(groupTextsIntoLines);
+    const subtitleFrames: GroupedFrame[] = filterSubtitleLike(groupedFrames);
 
     const uniquePhrases = new Set<string>();
-    groupedFrames.forEach((frame) =>
+    subtitleFrames.forEach((frame) =>
       frame.texts.forEach((t) => uniquePhrases.add(t.text))
     );
 
@@ -264,7 +341,7 @@ export async function translateVideoAss(
     console.log(`   ✅ Translated ${Object.keys(translationMap).length} texts`);
 
     console.log("🎨 Step 5: Applying translations to frames...");
-    const translatedFrames: TranslatedFrame[] = groupedFrames.map((frame) => ({
+    const translatedFrames: TranslatedFrame[] = subtitleFrames.map((frame) => ({
       ...frame,
       texts: frame.texts.map((textObj) => ({
         ...textObj,

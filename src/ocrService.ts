@@ -112,7 +112,7 @@ export async function detectTextInFrame(imagePath: string): Promise<TextBox[]> {
       throw new Error(`Vision API error: ${response.statusText}`);
     }
 
-    const data: VisionResponse = await response.json();
+    const data = await response.json() as VisionResponse;
     const annotations = data.responses?.[0]?.textAnnotations || [];
 
     if (annotations.length === 0) {

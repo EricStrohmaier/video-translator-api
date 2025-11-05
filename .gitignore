@@ -11,7 +11,7 @@ package-lock.json
 *.avi
 *.mkv
 *.webm
-
+dist
 # Temporary files
 temp/
 *.log

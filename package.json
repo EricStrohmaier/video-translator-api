@@ -9,6 +9,7 @@
     "dev:prod": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:prod": "tsx src/index.ts",
+    "build": "tsc",
     "test": "tsx src/test.ts",
     "subtitle": "tsx src/subtitleTranslator.ts"
   },
@@ -29,9 +30,13 @@
     "openai": "^4.20.0"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@aws-sdk/s3-request-presigner": "^3.922.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^24.9.2",
     "@types/node-fetch": "^2.6.13",
+    "@types/pg": "^8.15.6",
     "ffmpeg-static": "^5.2.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"

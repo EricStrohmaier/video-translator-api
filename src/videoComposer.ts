@@ -14,7 +14,7 @@ const FONT_CANDIDATES: string[] = [
   '/Library/Fonts/Arial Unicode.ttf',
   '/Library/Fonts/Arial Unicode MS.ttf',
   '/System/Library/Fonts/STHeiti Light.ttc',
-].filter(Boolean);
+].filter((f): f is string => Boolean(f));
 
 function pickFont(): string | null {
   for (const p of FONT_CANDIDATES) {

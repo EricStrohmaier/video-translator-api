@@ -6,7 +6,9 @@
       "Bash(awk:*)",
       "Bash(xargs cat:*)",
       "Bash(npm ls:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []
