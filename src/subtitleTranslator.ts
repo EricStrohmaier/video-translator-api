@@ -1,10 +1,15 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import dotenv from 'dotenv';
-import { extractFrames, getVideoDuration } from './frameExtractor.js';
-import { detectTextInFrames } from './ocrService.js';
-import { translateTexts } from './translationService.js';
-import { overlaySubtitlesBottomCenter, TranslatedFrame, SubtitleOptions, renderSubtitlesPreview } from './subtitleComposer.js';
+import { promises as fs } from "fs";
+import path from "path";
+import dotenv from "dotenv";
+import { extractFrames, getVideoDuration } from "./frameExtractor.js";
+import { detectTextInFrames } from "./ocrService.js";
+import { translateTexts } from "./translationService.js";
+import {
+  overlaySubtitlesBottomCenter,
+  TranslatedFrame,
+  SubtitleOptions,
+  renderSubtitlesPreview,
+} from "./subtitleComposer.js";
 
 dotenv.config();
 
@@ -12,10 +17,17 @@ function normalizeCJKSpacing(s: string): string {
   if (!s) return s;
   const hasCJK = /[\u3400-\u9fff\uf900-\ufaff]/.test(s);
   if (!hasCJK) return s;
-  return s.replace(/([\u3400-\u9fff\uf900-\ufaff])\s+(?=[\u3400-\u9fff\uf900-\ufaff])/g, '$1');
+  return s.replace(
+    /([\u3400-\u9fff\uf900-\ufaff])\s+(?=[\u3400-\u9fff\uf900-\ufaff])/g,
+    "$1"
+  );
 }
 
-export async function previewVideoAss(videoPath: string, targetLanguage: string, options?: SubtitleOptions) {
+export async function previewVideoAss(
+  videoPath: string,
+  targetLanguage: string,
+  options?: SubtitleOptions & { previewAtSeconds?: number }
+) {
   const absoluteVideoPath = path.resolve(videoPath);
   const workDir = path.resolve(`./temp/job_${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -23,47 +35,127 @@ export async function previewVideoAss(videoPath: string, targetLanguage: string,
 
   // 1) Extract frames
   const frames = await extractFrames(absoluteVideoPath, `${workDir}/frames`);
-  if (!frames.length) throw new Error('No frames extracted');
+  if (!frames.length) throw new Error("No frames extracted");
 
-  // 2) OCR only until first frame with text
+  // 2) Pick starting frame
   let chosen: any | null = null;
-  for (const f of frames) {
-    const detections = await detectTextInFrames([f]);
-    if (detections[0]?.texts?.length) {
-      chosen = detections[0];
+  let startIndex = 0;
+  const at =
+    typeof options?.previewAtSeconds === "number" &&
+    options.previewAtSeconds >= 0
+      ? Math.floor(options.previewAtSeconds)
+      : null;
+  if (at !== null) {
+    // Choose nearest frame to the requested second by frameNumber proximity
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < frames.length; i++) {
+      const dist = Math.abs(frames[i].frameNumber - 1 - at);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    startIndex = bestIdx;
+  }
+
+  // 3) OCR forward from startIndex to find a frame with meaningful text; then fallback backward
+  const hasMeaningful = (s: string) => /[\p{L}\p{N}\u3400-\u9fff]/u.test(s);
+  const tryIndex = async (idx: number) => {
+    const detections = await detectTextInFrames([frames[idx]]);
+    const det = detections[0];
+    if (!det?.texts?.length) return null;
+    const grouped = groupTextsIntoLines(det as any);
+    const merged = grouped.texts
+      .map((t) => t.text)
+      .join(" ")
+      .trim();
+    if (merged && hasMeaningful(merged)) {
+      return { det, grouped };
+    }
+    return null;
+  };
+
+  for (let i = startIndex; i < frames.length; i++) {
+    const found = await tryIndex(i);
+    if (found) {
+      chosen = found;
       break;
     }
   }
-  if (!chosen) throw new Error('No text found to preview');
+  if (!chosen) {
+    for (let i = startIndex - 1; i >= 0; i--) {
+      const found = await tryIndex(i);
+      if (found) {
+        chosen = found;
+        break;
+      }
+    }
+  }
+  if (!chosen) throw new Error("No text found to preview");
 
-  // 3) Group words into a single line-level phrase
-  const grouped = groupTextsIntoLines(chosen as any);
+  // 3) Use grouped from chosen
+  const grouped: GroupedFrame = (chosen as any).grouped;
 
   // 4) Translate only that frame's texts
-  const unique = Array.from(new Set(grouped.texts.map((t) => t.text)));
-  const translationMap: Record<string, string> = await translateTexts(unique, targetLanguage);
+  const unique = Array.from(
+    new Set<string>(grouped.texts.map((t) => t.text))
+  );
+  const translationMap: Record<string, string> = await translateTexts(
+    unique,
+    targetLanguage
+  );
   const translatedFrame: TranslatedFrame = {
-    frameNumber: (chosen as any).frameNumber,
+    frameNumber: (chosen as any).det.frameNumber,
     texts: grouped.texts.map((t) => ({
       ...t,
       translatedText:
-        process.env.NORMALIZE_CJK_SPACING === '0'
+        process.env.NORMALIZE_CJK_SPACING === "0"
           ? translationMap[t.text] || t.text
           : normalizeCJKSpacing(translationMap[t.text] || t.text),
     })),
   } as unknown as TranslatedFrame;
 
   // 5) Render PNG preview
-  const previewPath = path.resolve(workDir, 'preview.png');
-  await renderSubtitlesPreview(absoluteVideoPath, translatedFrame, previewPath, options || {});
+  const previewPath = path.resolve(workDir, "preview.png");
+  await renderSubtitlesPreview(
+    absoluteVideoPath,
+    translatedFrame,
+    previewPath,
+    options || {}
+  );
   return { previewPath, workDir, frameNumber: translatedFrame.frameNumber };
 }
 
-type OCRBox = { x: number; y: number; width: number; height: number; text: string; fontSize?: number };
+type OCRBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  fontSize?: number;
+};
 
-type FrameDet = { framePath: string; frameName: string; frameNumber: number; texts: OCRBox[] };
+type FrameDet = {
+  framePath: string;
+  frameName: string;
+  frameNumber: number;
+  texts: OCRBox[];
+};
 
-type GroupedFrame = { framePath: string; frameName: string; frameNumber: number; texts: { text: string; x: number; y: number; width: number; height: number; fontSize: number }[] };
+type GroupedFrame = {
+  framePath: string;
+  frameName: string;
+  frameNumber: number;
+  texts: {
+    text: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fontSize: number;
+  }[];
+};
 
 function groupTextsIntoLines(frame: FrameDet): GroupedFrame {
   const items = (frame.texts || [])
@@ -105,24 +197,33 @@ function groupTextsIntoLines(frame: FrameDet): GroupedFrame {
     const fontSize = Math.round(
       Math.max(...sorted.map((i) => i.fontSize || Math.round(i.height * 0.8)))
     );
-    const original = sorted.map((i) => i.text).join(' ');
+    const original = sorted.map((i) => i.text).join(" ");
     return { text: original, x: minX, y: minY, width, height, fontSize };
   });
 
-  return { framePath: frame.framePath, frameName: frame.frameName, frameNumber: frame.frameNumber, texts: groups };
+  return {
+    framePath: frame.framePath,
+    frameName: frame.frameName,
+    frameNumber: frame.frameNumber,
+    texts: groups,
+  };
 }
 
-export async function translateVideoAss(videoPath: string, targetLanguage: string, options?: SubtitleOptions) {
+export async function translateVideoAss(
+  videoPath: string,
+  targetLanguage: string,
+  options?: SubtitleOptions
+) {
   const startTime = Date.now();
   const absoluteVideoPath = path.resolve(videoPath);
   const workDir = path.resolve(`./temp/job_${Date.now()}`);
 
   try {
-    console.log('📁 Creating working directory...');
+    console.log("📁 Creating working directory...");
     await fs.mkdir(workDir, { recursive: true });
     await fs.mkdir(`${workDir}/frames`, { recursive: true });
 
-    console.log('🎞️  Step 1: Extracting frames (1 fps)...');
+    console.log("🎞️  Step 1: Extracting frames (1 fps)...");
     const frames = await extractFrames(absoluteVideoPath, `${workDir}/frames`);
     console.log(`   ✅ Extracted ${frames.length} frames`);
     const durationSec = Math.round(await getVideoDuration(absoluteVideoPath));
@@ -131,48 +232,70 @@ export async function translateVideoAss(videoPath: string, targetLanguage: strin
     const filteredFrames = frames.filter((f: any) => {
       const t = f.frameNumber - 1;
       if (t < SKIP_INTRO_SECONDS) return false;
-      if (SKIP_OUTRO_SECONDS > 0 && t >= Math.max(0, durationSec - SKIP_OUTRO_SECONDS)) return false;
+      if (
+        SKIP_OUTRO_SECONDS > 0 &&
+        t >= Math.max(0, durationSec - SKIP_OUTRO_SECONDS)
+      )
+        return false;
       return true;
     });
 
-    console.log('🔍 Step 2: Detecting text with OCR...');
+    console.log("🔍 Step 2: Detecting text with OCR...");
     const detections: FrameDet[] = await detectTextInFrames(filteredFrames);
-    console.log(`   ✅ Detected text in ${detections.filter((d) => d.texts.length > 0).length} frames`);
+    console.log(
+      `   ✅ Detected text in ${
+        detections.filter((d) => d.texts.length > 0).length
+      } frames`
+    );
 
-    console.log('📝 Step 3: Grouping OCR words into lines...');
+    console.log("📝 Step 3: Grouping OCR words into lines...");
     const groupedFrames: GroupedFrame[] = detections.map(groupTextsIntoLines);
 
     const uniquePhrases = new Set<string>();
-    groupedFrames.forEach((frame) => frame.texts.forEach((t) => uniquePhrases.add(t.text)));
+    groupedFrames.forEach((frame) =>
+      frame.texts.forEach((t) => uniquePhrases.add(t.text))
+    );
 
     console.log(`🌍 Step 4: Translating to ${targetLanguage}...`);
-    const translationMap: Record<string, string> = await translateTexts(Array.from(uniquePhrases), targetLanguage);
+    const translationMap: Record<string, string> = await translateTexts(
+      Array.from(uniquePhrases),
+      targetLanguage
+    );
     console.log(`   ✅ Translated ${Object.keys(translationMap).length} texts`);
 
-    console.log('🎨 Step 5: Applying translations to frames...');
+    console.log("🎨 Step 5: Applying translations to frames...");
     const translatedFrames: TranslatedFrame[] = groupedFrames.map((frame) => ({
       ...frame,
       texts: frame.texts.map((textObj) => ({
         ...textObj,
         translatedText:
-          process.env.NORMALIZE_CJK_SPACING === '0'
+          process.env.NORMALIZE_CJK_SPACING === "0"
             ? translationMap[textObj.text] || textObj.text
             : normalizeCJKSpacing(translationMap[textObj.text] || textObj.text),
       })),
     })) as unknown as TranslatedFrame[];
 
-    console.log('🎬 Step 6: Creating video with subtitles (ASS bottom-center)...');
-    const outputPath = path.resolve(workDir, 'output_translated.mp4');
-    await overlaySubtitlesBottomCenter(absoluteVideoPath, translatedFrames, outputPath, options || {});
+    console.log(
+      "🎬 Step 6: Creating video with subtitles (ASS bottom-center)..."
+    );
+    const outputPath = path.resolve(workDir, "output_translated.mp4");
+    await overlaySubtitlesBottomCenter(
+      absoluteVideoPath,
+      translatedFrames,
+      outputPath,
+      options || {}
+    );
     console.log(`   ✅ Video created: ${outputPath}`);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const outputSize = (await fs.stat(outputPath)).size;
 
-    console.log('');
-    console.log('✨ Translation complete!');
+    console.log("");
+    console.log("✨ Translation complete!");
     console.log(`   ⏱️  Duration: ${duration}s`);
-    console.log(`   📊 Translations applied: ${Object.keys(translationMap).length}`);
+    console.log(
+      `   📊 Translations applied: ${Object.keys(translationMap).length}`
+    );
     console.log(`   📁 Output: ${outputPath}`);
     console.log(`   💾 Size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
 
@@ -188,7 +311,7 @@ export async function translateVideoAss(videoPath: string, targetLanguage: strin
       },
     };
   } catch (error) {
-    console.error('❌ Error in translation workflow:', error);
+    console.error("❌ Error in translation workflow:", error);
     throw error;
   }
 }

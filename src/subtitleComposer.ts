@@ -30,12 +30,15 @@ function hexToAss(hex: string | undefined, defaultHex?: string): string {
     const bb = h.slice(4, 6);
     return `&H00${bb}${gg}${rr}`;
   }
-  // 8-digit RGBA
+  // 8-digit RGBA (input: 00=transparent, FF=opaque)
+  // ASS uses inverted alpha (00=opaque, FF=transparent)
   const rr = h.slice(0, 2);
   const gg = h.slice(2, 4);
   const bb = h.slice(4, 6);
-  const aa = h.slice(6, 8); // alpha 00=opaque, FF=transparent in RGBA
-  return `&H${aa}${bb}${gg}${rr}`;
+  const aaRGBA = h.slice(6, 8);
+  // Convert RGBA alpha to ASS alpha by inverting: FF - aaRGBA
+  const aaASS = (255 - parseInt(aaRGBA, 16)).toString(16).toUpperCase().padStart(2, '0');
+  return `&H${aaASS}${bb}${gg}${rr}`;
 }
 
 const SUB_TEXT_ASS = hexToAss(process.env.SUB_TEXT_COLOR, 'FFFFFF'); // default white text
@@ -59,9 +62,10 @@ export type SubtitleOptions = {
   fontName?: string;
   cjkWidthFactor?: number;
   latinWidthFactor?: number;
-  // Soft badge controls (Option A)
-  roundedRadius?: number; // visual softness via blur
-  bgBlur?: number;        // pixels to blur the shape edges
+  // Soft badge controls
+  roundedRadius?: number; // corner radius in pixels for rounded rectangles (0 = no rounded corners)
+  bgBlur?: number;        // blur amount in pixels for soft edges (0 = sharp edges)
+  softBadge?: boolean;    // deprecated: use roundedRadius instead
 };
 
 async function ensureExternalFont(fontUrl: string, fontsDir: string): Promise<{ fname: string; fpath: string } | null> {
@@ -210,6 +214,7 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
   const latinFactor = Number(opts.latinWidthFactor ?? LATIN_WIDTH_FACTOR);
   const roundedRadius = Math.max(0, Number(opts.roundedRadius ?? 0));
   const bgBlur = Math.max(0, Number(opts.bgBlur ?? 0));
+  const useRounded = roundedRadius > 0; // simple: rounded corners without blur
 
   const header = [
     '[Script Info]',
@@ -219,8 +224,8 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // If using soft badge, disable opaque box (BorderStyle=1 and fully transparent BackColour)
-    roundedRadius > 0 || bgBlur > 0
+    // If using rounded badge, disable opaque box (BorderStyle=1 and fully transparent BackColour)
+    useRounded
       ? `Style: Default,Arial,${baseFontSize},${textAss},&H000000FF,&H00000000,&HFF000000,-1,0,0,0,100,100,0,0,1,0,0,2,10,10,${marginV},1`
       : `Style: Default,Arial,${baseFontSize},${textAss},&H000000FF,&H00000000,${backAss},-1,0,0,0,100,100,0,0,3,0,0,2,10,10,${marginV},1`,
     '',
@@ -237,14 +242,22 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
     const est = s.length * factor * baseFontSize;
     let out = s;
     if (!forceOneLine && est > maxWidth) {
-      const tokens = cjk ? s.split('') : s.split(/\s+/);
-      const half = Math.ceil(tokens.length / 2);
+      // Keep a leading enumerator like "1.", "2)", "1、" attached to the first line
+      const enumMatch = /^\s*([0-9]+[\.．、\)]\s*)/.exec(s);
+      const prefix = enumMatch ? enumMatch[0] : '';
+      const rest = s.slice(prefix.length);
+
       if (cjk) {
-        out = tokens.slice(0, half).join('') + '\n' + tokens.slice(half).join('');
+        const tokens = rest.split('');
+        const half = Math.ceil(tokens.length / 2);
+        const l = prefix + tokens.slice(0, half).join('');
+        const r = tokens.slice(half).join('');
+        out = `${l}\n${r}`;
       } else {
-        const words = s.split(/\s+/);
-        const l = words.slice(0, Math.ceil(words.length / 2)).join(' ');
-        const r = words.slice(Math.ceil(words.length / 2)).join(' ');
+        const words = rest.split(/\s+/);
+        const half = Math.ceil(words.length / 2);
+        const l = (prefix + words.slice(0, half).join(' ')).trim();
+        const r = words.slice(half).join(' ');
         out = `${l}\n${r}`;
       }
     }
@@ -264,6 +277,7 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
     return { a: m[1].toUpperCase(), c: m[2].toUpperCase() };
   };
   const backParts = assColorParts(backAss);
+  const textParts = assColorParts(textAss);
   for (const ev of merged) {
     if (!ev.text) continue;
     const start = assTime(ev.start);
@@ -273,7 +287,7 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
     // Compute box size based on lines
     const lines = t.split('\\N');
     const lineHeights = lines.map(() => baseFontSize);
-    const lineGap = Math.round(baseFontSize * 0.15);
+    const lineGap = Math.round(baseFontSize * 0.2); // Increase gap slightly for better spacing
     const contentH = lineHeights.reduce((acc, h, i) => acc + h + (i ? lineGap : 0), 0);
     const estWidths = lines.map((ln) => (ln.length * (isCJK(ln) ? cjkFactor : latinFactor) * baseFontSize));
     const contentW = Math.max(1, Math.round(Math.max(...estWidths)));
@@ -282,20 +296,49 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
     const boxW = Math.round(contentW + padX * 2);
     const boxH = Math.round(contentH + padY * 2);
 
-    // Optional soft badge via vector drawing
-    let shape = '';
-    if (roundedRadius > 0 || bgBlur > 0) {
-      // Draw rectangle centered at (posX,posY) using bottom-center anchor (an2), y from -boxH to 0
-      const halfW = Math.round(boxW / 2);
-      // Use blur as softness; roundedRadius contributes to perceived roundness
-      const blurAmt = Math.max(bgBlur, roundedRadius);
-      shape = `{\\an2\\pos(${posX},${posY})\\p1\\c&H${backParts.c}&\\alpha&H${backParts.a}&\\bord0${blurAmt > 0 ? `\\blur${blurAmt}` : ''}}m ${-halfW},${-boxH} l ${halfW},${-boxH} l ${halfW},0 l ${-halfW},0{\\p0}`;
-    }
+    if (useRounded) {
+      // For rounded mode: emit background shape as a separate dialogue layer, then text on top
+      // Shape uses \an7 (top-left) with absolute positioning
+      // With \an2, text baseline is at posY. We need to adjust for proper centering.
+      // Add a small offset to account for descenders and ensure text looks centered in the box
+      const baselineOffset = Math.round(baseFontSize * 0.15); // ~15% of font size for descenders
+      const boxLeft = posX - Math.round(boxW / 2);
+      const boxTop = posY - boxH + baselineOffset;
 
-    const textTag = roundedRadius > 0 || bgBlur > 0
-      ? `{\\an2\\pos(${posX},${posY})\\fs${baseFontSize}\\bord0\\b1}`
-      : `{\\an2\\pos(${posX},${posY})\\fs${baseFontSize}\\bord${boxPad}\\b1}`;
-    events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${shape}${textTag}${t}`);
+      // For \an7 positioning, we draw from (0,0) to (boxW, boxH)
+      const r = Math.min(roundedRadius, Math.floor(Math.min(boxW, boxH) / 2));
+      const k = Math.round(r * 0.5522847498);
+
+      // Draw the shape with origin at (0,0) for \an7
+      const xL = 0, xLi = r, xLo = r - k;
+      const xR = boxW, xRi = boxW - r, xRo = boxW - r + k;
+      const yT = 0, yTi = r, yTo = r - k;
+      const yB = boxH, yBi = boxH - r, yBo = boxH - r + k;
+
+      const shapePath = [
+        `m ${xLi} ${yT}`,
+        `l ${xRi} ${yT}`,
+        `b ${xRo} ${yT} ${xR} ${yTo} ${xR} ${yTi}`,
+        `l ${xR} ${yBi}`,
+        `b ${xR} ${yBo} ${xRo} ${yB} ${xRi} ${yB}`,
+        `l ${xLi} ${yB}`,
+        `b ${xLo} ${yB} ${xL} ${yBo} ${xL} ${yBi}`,
+        `l ${xL} ${yTi}`,
+        `b ${xL} ${yTo} ${xLo} ${yT} ${xLi} ${yT}`,
+      ].join(' ');
+
+      // Apply blur to background shape if bgBlur is specified
+      const blurTag = bgBlur > 0 ? `\\blur${bgBlur}` : '';
+      const shapeDialogue = `{\\an7\\pos(${boxLeft},${boxTop})${blurTag}\\p1\\c&H${backParts.c}&\\alpha&H${backParts.a}&\\bord0}${shapePath}{\\p0}`;
+      const textDialogue = `{\\an2\\pos(${posX},${posY})\\fs${baseFontSize}\\b1\\bord0\\c&H${textParts.c}&\\alpha&H${textParts.a}&}${t}`;
+
+      // Layer 0 for background, layer 1 for text to ensure text is on top
+      events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${shapeDialogue}`);
+      events.push(`Dialogue: 1,${start},${end},Default,,0,0,0,,${textDialogue}`);
+    } else {
+      const textTag = `{\\an2\\pos(${posX},${posY})\\fs${baseFontSize}\\bord${boxPad}\\b1}`;
+      events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${textTag}${t}`);
+    }
   }
 
   const outDir = path.dirname(outputPath);
@@ -305,10 +348,10 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
 
   const assEsc = assPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
   let subFilter = `subtitles='${assEsc}'`;
-  if (ASS_FONT_URL) {
+  if ((opts.fontUrl && opts.fontUrl.trim().length > 0) || (ASS_FONT_URL && ASS_FONT_URL.trim().length > 0)) {
     const fontsDir = path.join(outDir, 'fonts');
     try {
-      const info = await ensureExternalFont(opts.fontUrl ?? ASS_FONT_URL, fontsDir);
+      const info = await ensureExternalFont((opts.fontUrl && opts.fontUrl.trim().length > 0 ? opts.fontUrl : ASS_FONT_URL), fontsDir);
       if (info) {
         const fontsDirEsc = fontsDir.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
         const chosenName = (opts.fontName && opts.fontName.trim().length > 0 ? opts.fontName : (ASS_FONT_NAME && ASS_FONT_NAME.trim().length > 0 ? ASS_FONT_NAME : deriveFontNameFromFilename(info.fname)));
@@ -362,9 +405,32 @@ export async function overlaySubtitlesBottomCenter(inputPath: string, translated
 // Preview renderer: outputs a single PNG using the same ASS styling
 export async function renderSubtitlesPreview(inputPath: string, frame: TranslatedFrame, outputPngPath: string, opts: SubtitleOptions = {}) {
   const tempVideoOut = path.join(path.dirname(outputPngPath), 'preview_tmp_video.mp4');
-  await overlaySubtitlesBottomCenter(inputPath, [frame], tempVideoOut, opts);
+  // If previewAtSeconds is provided, trim the source to a 1s clip starting there
+  const startAt = typeof (opts as any)?.previewAtSeconds === 'number' && (opts as any).previewAtSeconds >= 0
+    ? Number((opts as any).previewAtSeconds)
+    : 0;
+
+  const tempBase = path.join(path.dirname(outputPngPath), 'preview_base.mp4');
+  await new Promise<void>((resolve, reject) => {
+    const cmd = ffmpeg(inputPath)
+      .seekInput(startAt)
+      .duration(1)
+      .videoCodec(process.platform === 'darwin' ? 'h264_videotoolbox' : 'libx264')
+      .audioCodec(process.platform === 'darwin' ? 'aac_at' : 'aac')
+      .outputOptions(['-movflags', '+faststart'])
+      .output(tempBase)
+      .on('end', () => resolve())
+      .on('error', (e) => reject(e));
+    if (process.platform !== 'darwin') cmd.outputOptions(['-pix_fmt', 'yuv420p']);
+    cmd.run();
+  });
+
+  // Shift the event to start at t=0..1s so grabbing the first frame shows the subtitle
+  const shifted: TranslatedFrame = { frameNumber: 1, texts: frame.texts } as TranslatedFrame;
+  await overlaySubtitlesBottomCenter(tempBase, [shifted], tempVideoOut, opts);
   await new Promise<void>((resolve, reject) => {
     ffmpeg(tempVideoOut)
+      .seekInput(0.5)
       .outputOptions(['-vframes', '1'])
       .output(outputPngPath)
       .on('end', () => resolve())
