@@ -3,7 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { extractFrames, getVideoDuration } from "./frameExtractor.js";
 import { detectTextInFrames } from "./ocrService.js";
-import { translateTexts } from "./translationService.js";
+import { translateTexts, translateSequence } from "./translationService.js";
 import {
   overlaySubtitlesBottomCenter,
   TranslatedFrame,
@@ -328,29 +328,88 @@ export async function translateVideoAss(
     const groupedFrames: GroupedFrame[] = detections.map(groupTextsIntoLines);
     const subtitleFrames: GroupedFrame[] = filterSubtitleLike(groupedFrames);
 
-    const uniquePhrases = new Set<string>();
-    subtitleFrames.forEach((frame) =>
-      frame.texts.forEach((t) => uniquePhrases.add(t.text))
-    );
+    const stepMode = process.env.STEP_MODE === "1";
+    let translatedFrames: TranslatedFrame[];
+    let textsDetectedCount = 0;
+    let translationsAppliedCount = 0;
+    if (stepMode) {
+      const perFrame = subtitleFrames
+        .map((f) => ({
+          frameNumber: f.frameNumber,
+          text: (f.texts || [])
+            .map((t) => (t.text || "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+        }))
+        .filter((x) => x.text.length > 0);
 
-    console.log(`🌍 Step 4: Translating to ${targetLanguage}...`);
-    const translationMap: Record<string, string> = await translateTexts(
-      Array.from(uniquePhrases),
-      targetLanguage
-    );
-    console.log(`   ✅ Translated ${Object.keys(translationMap).length} texts`);
+      // Ordered unique sequence (preserve first occurrence)
+      const seen = new Set<string>();
+      const sequence = perFrame
+        .map((x) => x.text)
+        .filter((t) => {
+          if (seen.has(t)) return false;
+          seen.add(t);
+          return true;
+        });
 
-    console.log("🎨 Step 5: Applying translations to frames...");
-    const translatedFrames: TranslatedFrame[] = subtitleFrames.map((frame) => ({
-      ...frame,
-      texts: frame.texts.map((textObj) => ({
-        ...textObj,
-        translatedText:
-          process.env.NORMALIZE_CJK_SPACING === "0"
-            ? translationMap[textObj.text] || textObj.text
-            : normalizeCJKSpacing(translationMap[textObj.text] || textObj.text),
-      })),
-    })) as unknown as TranslatedFrame[];
+      if (process.env.DEBUG_TRANSLATION === "1") {
+        try {
+          await fs.writeFile(path.resolve(workDir, "segments_raw.json"), JSON.stringify(perFrame, null, 2));
+          await fs.writeFile(path.resolve(workDir, "sequence_ordered.json"), JSON.stringify(sequence, null, 2));
+        } catch {}
+      }
+
+      console.log(`🌍 Step 4: Translating sequence to ${targetLanguage}...`);
+      const seqMap = await translateSequence(sequence, targetLanguage);
+      console.log(`   ✅ Translated ${Object.keys(seqMap).length} sequence items`);
+      textsDetectedCount = sequence.length;
+      translationsAppliedCount = Object.keys(seqMap).length;
+
+      console.log("🎨 Step 5: Applying translations to frames...");
+      translatedFrames = subtitleFrames.map((frame) => {
+        const joined = (frame.texts || [])
+          .map((t) => (t.text || "").trim())
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        const translatedJoined = process.env.NORMALIZE_CJK_SPACING === "0"
+          ? (seqMap[joined] || joined)
+          : normalizeCJKSpacing(seqMap[joined] || joined);
+        const outTexts = (frame.texts || []).map((t, idx) => ({
+          ...t,
+          translatedText: idx === 0 ? translatedJoined : "",
+        }));
+        return { frameNumber: frame.frameNumber, texts: outTexts } as unknown as TranslatedFrame;
+      });
+    } else {
+      const uniquePhrases = new Set<string>();
+      subtitleFrames.forEach((frame) =>
+        frame.texts.forEach((t) => uniquePhrases.add(t.text))
+      );
+
+      console.log(`🌍 Step 4: Translating to ${targetLanguage}...`);
+      const translationMap: Record<string, string> = await translateTexts(
+        Array.from(uniquePhrases),
+        targetLanguage
+      );
+      console.log(`   ✅ Translated ${Object.keys(translationMap).length} texts`);
+      textsDetectedCount = uniquePhrases.size;
+      translationsAppliedCount = Object.keys(translationMap).length;
+
+      console.log("🎨 Step 5: Applying translations to frames...");
+      translatedFrames = subtitleFrames.map((frame) => ({
+        ...frame,
+        texts: frame.texts.map((textObj) => ({
+          ...textObj,
+          translatedText:
+            process.env.NORMALIZE_CJK_SPACING === "0"
+              ? translationMap[textObj.text] || textObj.text
+              : normalizeCJKSpacing(translationMap[textObj.text] || textObj.text),
+        })),
+      })) as unknown as TranslatedFrame[];
+    }
 
     console.log(
       "🎬 Step 6: Creating video with subtitles (ASS bottom-center)..."
@@ -370,9 +429,7 @@ export async function translateVideoAss(
     console.log("");
     console.log("✨ Translation complete!");
     console.log(`   ⏱️  Duration: ${duration}s`);
-    console.log(
-      `   📊 Translations applied: ${Object.keys(translationMap).length}`
-    );
+    console.log(`   📊 Translations applied: ${translationsAppliedCount}`);
     console.log(`   📁 Output: ${outputPath}`);
     console.log(`   💾 Size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
 
@@ -381,8 +438,8 @@ export async function translateVideoAss(
       workDir,
       stats: {
         framesProcessed: filteredFrames.length,
-        textsDetected: uniquePhrases.size,
-        translationsApplied: Object.keys(translationMap).length,
+        textsDetected: textsDetectedCount,
+        translationsApplied: translationsAppliedCount,
         processingTime: `${duration}s`,
         outputSize: `${(outputSize / 1024 / 1024).toFixed(2)} MB`,
       },

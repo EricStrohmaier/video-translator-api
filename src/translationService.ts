@@ -32,7 +32,6 @@ Chinese-specific instructions:
   * "Look back" → "回看" (not "看回来")
   * "Hold position" → "保持姿势" (not "保持位置")`;
   }
-
   if (lang.includes("japanese") || lang.includes("日本語") || lang === "ja") {
     return `
 
@@ -62,6 +61,64 @@ Spanish-specific instructions:
   }
 
   return ""; // No specific instructions for other languages
+}
+
+export async function translateSequence(
+  texts: string[],
+  targetLanguage: string
+): Promise<TranslationMap> {
+  if (!Array.isArray(texts) || texts.length === 0) return {};
+  try {
+    const languageInstructions = getLanguageSpecificInstructions(targetLanguage);
+    const numbered = texts.map((t, i) => ({ index: i + 1, text: t })).filter((x) => (x.text || '').trim().length > 0);
+    const prompt = `You are a professional subtitle/localization translator specializing in educational, step-based video content.
+You are given an ordered sequence of on-screen English lines. Translate them into natural, readable ${targetLanguage} suitable for bottom-center subtitles.
+
+Rules:
+- Keep meaning and intent; do not translate brand names.
+- Preserve numbers, times, and units as-is.
+- If a line represents a step or enumerated item, preserve numbering and adapt to natural ${targetLanguage} style.
+- Prefer concise, actionable phrasing suitable for instructional subtitles.
+- Prefer consistent terminology across the entire sequence.
+- If a line is meaningless noise, return the original.
+${languageInstructions}
+
+Return ONLY a valid JSON object mapping each original string to its translation: { "<original>": "<translated>" }.
+
+Sequence:\n${JSON.stringify(numbered)}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "Return only valid JSON with original text as keys and translations as values. No extra text." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 3000,
+    });
+
+    const content = response.choices[0].message.content!;
+    if (DEBUG_TRANSLATION) {
+      console.log("   [debug] sequence translation raw length:", content.length);
+      console.log("   [debug] sequence translation snippet:", content.slice(0, 300));
+    }
+
+    let translationMap: TranslationMap;
+    try {
+      translationMap = JSON.parse(content);
+    } catch {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) translationMap = JSON.parse(match[0]);
+      else throw new Error("Invalid JSON response from OpenAI");
+    }
+    for (const t of texts) {
+      if (!(t in translationMap) || !translationMap[t]) translationMap[t] = t;
+    }
+    return translationMap;
+  } catch (error) {
+    console.error("Sequence translation error:", (error as Error).message);
+    throw new Error(`Failed to translate sequence: ${(error as Error).message}`);
+  }
 }
 
 /**
