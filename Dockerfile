@@ -9,11 +9,16 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
+# Ensure dev dependencies install even if platform injects production flags
+ARG NODE_ENV
 ENV NODE_ENV=development
+ENV npm_config_production=false
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 # Install dependencies (including dev dependencies for building)
-RUN npm ci
+# Fallback to npm install if npm ci fails (e.g., peer deps resolution differences)
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
@@ -36,9 +41,10 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
 
 # Install production dependencies
-COPY package*.json ./
+COPY package.json package-lock.json ./
 ENV NODE_ENV=production
-RUN npm ci --omit=dev
+# Prefer ci, but fall back if lockfile is missing or incompatible
+RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
