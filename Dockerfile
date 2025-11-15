@@ -8,8 +8,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+# Copy package files (lockfile optional)
+COPY package*.json ./
 # Ensure dev dependencies install even if platform injects production flags
 ARG NODE_ENV
 ENV NODE_ENV=development
@@ -40,8 +40,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Install production dependencies
-COPY package.json package-lock.json ./
+# Install production dependencies (lockfile optional)
+COPY package*.json ./
 ENV NODE_ENV=production
 # Prefer ci, but fall back if lockfile is missing or incompatible
 RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
