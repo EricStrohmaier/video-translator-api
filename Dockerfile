@@ -10,9 +10,13 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+ENV NODE_ENV=development
 
-# Install dependencies (including dev dependencies for building if needed)
+# Install dependencies (including dev dependencies for building)
 RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
 
 # Production stage
 FROM node:20-slim
@@ -31,13 +35,13 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Copy node_modules from builder
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy application code
+# Install production dependencies
 COPY package*.json ./
-COPY tsconfig.json ./
-COPY src ./src
+ENV NODE_ENV=production
+RUN npm ci --omit=dev
+
+# Copy built application
+COPY --from=builder /app/dist ./dist
 
 # Create necessary directories with proper permissions
 RUN mkdir -p uploads temp && \
@@ -54,4 +58,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]
