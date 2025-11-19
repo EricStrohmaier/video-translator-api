@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 import type { TranslationMap } from "./types.js";
 
 dotenv.config();
@@ -8,23 +9,23 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
-const deepseek = deepseekApiKey
-  ? new OpenAI({
-      apiKey: deepseekApiKey,
-      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-    })
-  : null;
+const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
+const DEEPL_API_URL =
+  process.env.DEEPL_API_URL || "https://api-free.deepl.com/v2/translate";
 
 const OPENAI_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-4o-mini";
-const DEEPSEEK_MODEL =
-  process.env.DEEPSEEK_TRANSLATION_MODEL || "deepseek-chat";
 const DEBUG_TRANSLATION = process.env.DEBUG_TRANSLATION === "1";
 
-function pickProvider(targetLanguage: string): "deepseek" | "openai" {
+type Provider = "deepl" | "openai";
+
+function pickProvider(targetLanguage: string): Provider {
   const lang = targetLanguage.toLowerCase();
-  const isZh = lang.includes("chinese") || lang.includes("中文") || lang.startsWith("zh");
-  if (isZh && deepseek) return "deepseek";
+  const isZh =
+    lang.includes("chinese") ||
+    lang.includes("中文") ||
+    lang === "zh" ||
+    lang.startsWith("zh");
+  if (isZh && DEEPL_API_KEY) return "deepl";
   return "openai";
 }
 
@@ -81,12 +82,98 @@ Spanish-specific instructions:
   return ""; // No specific instructions for other languages
 }
 
+interface DeepLTranslation {
+  detected_source_language: string;
+  text: string;
+}
+
+interface DeepLResponse {
+  translations: DeepLTranslation[];
+}
+
+async function translateWithDeepL(
+  texts: string[],
+  targetLanguage: string
+): Promise<TranslationMap> {
+  if (!DEEPL_API_KEY) {
+    throw new Error("DEEPL_API_KEY is not configured");
+  }
+
+  const nonEmpty = texts.filter((t) => (t || "").trim().length > 0);
+  if (nonEmpty.length === 0) {
+    return {};
+  }
+
+  const lang = targetLanguage.toLowerCase();
+  const targetLang =
+    lang.includes("chinese") ||
+    lang.includes("中文") ||
+    lang === "zh" ||
+    lang.startsWith("zh")
+      ? "ZH"
+      : targetLanguage.toUpperCase();
+
+  const response = await fetch(DEEPL_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `DeepL-Auth-Key ${DEEPL_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text: nonEmpty,
+      target_lang: targetLang,
+      source_lang: "EN",
+    }),
+  });
+
+  if (!response.ok) {
+    let body = "";
+    try {
+      body = await response.text();
+    } catch {
+      body = "";
+    }
+    throw new Error(
+      `DeepL API error: ${response.status} ${response.statusText}${
+        body ? ` - ${body}` : ""
+      }`
+    );
+  }
+
+  const data = (await response.json()) as DeepLResponse;
+
+  const translationMap: TranslationMap = {};
+  nonEmpty.forEach((t, idx) => {
+    const translated = data.translations?.[idx]?.text;
+    translationMap[t] =
+      translated && translated.trim().length > 0 ? translated : t;
+  });
+
+  for (const t of texts) {
+    if (!(t in translationMap) || !translationMap[t]) {
+      translationMap[t] = t;
+    }
+  }
+
+  return translationMap;
+}
+
 export async function translateSequence(
   texts: string[],
   targetLanguage: string
 ): Promise<TranslationMap> {
   if (!Array.isArray(texts) || texts.length === 0) return {};
   try {
+    const provider = pickProvider(targetLanguage);
+    if (provider === "deepl") {
+      if (DEBUG_TRANSLATION) {
+        try {
+          console.log("   [debug] provider: deepl");
+        } catch {}
+      }
+      return await translateWithDeepL(texts, targetLanguage);
+    }
+
     const languageInstructions =
       getLanguageSpecificInstructions(targetLanguage);
     const numbered = texts
@@ -108,16 +195,13 @@ Return ONLY a valid JSON object mapping each original string to its translation:
 
 Sequence:\n${JSON.stringify(numbered)}`;
 
-    const provider = pickProvider(targetLanguage);
-    const client = provider === "deepseek" ? deepseek! : openai;
-    const model = provider === "deepseek" ? DEEPSEEK_MODEL : OPENAI_MODEL;
     if (DEBUG_TRANSLATION) {
       try {
-        console.log(`   [debug] provider: ${provider}, model: ${model}`);
+        console.log(`   [debug] provider: openai, model: ${OPENAI_MODEL}`);
       } catch {}
     }
-    const response = await client.chat.completions.create({
-      model,
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
       messages: [
         {
           role: "system",
@@ -174,6 +258,16 @@ export async function translateTexts(
   }
 
   try {
+    const provider = pickProvider(targetLanguage);
+    if (provider === "deepl") {
+      if (DEBUG_TRANSLATION) {
+        try {
+          console.log("   [debug] provider: deepl");
+        } catch {}
+      }
+      return await translateWithDeepL(texts, targetLanguage);
+    }
+
     const languageInstructions =
       getLanguageSpecificInstructions(targetLanguage);
 
@@ -198,16 +292,13 @@ Example format: {"Hello": "Hola", "World": "Mundo"}
 
 Texts to translate: ${JSON.stringify(texts)}`;
 
-    const provider = pickProvider(targetLanguage);
-    const client = provider === "deepseek" ? deepseek! : openai;
-    const model = provider === "deepseek" ? DEEPSEEK_MODEL : OPENAI_MODEL;
     if (DEBUG_TRANSLATION) {
       try {
-        console.log(`   [debug] provider: ${provider}, model: ${model}`);
+        console.log(`   [debug] provider: openai, model: ${OPENAI_MODEL}`);
       } catch {}
     }
-    const response = await client.chat.completions.create({
-      model,
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
       messages: [
         {
           role: "system",

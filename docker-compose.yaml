@@ -33,13 +33,12 @@ services:
       # API Keys
       GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}
+      DEEPL_API_URL: ${DEEPL_API_URL:-https://api-free.deepl.com/v2/translate}
 
       # Translation Provider
       TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-auto}
       OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4o-mini}
-      DEEPSEEK_TRANSLATION_MODEL: ${DEEPSEEK_TRANSLATION_MODEL:-deepseek-chat}
 
       # Server Configuration
       PORT: 3000
